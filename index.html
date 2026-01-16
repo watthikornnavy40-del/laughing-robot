@@ -3,144 +3,196 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D World Hand Control (Fixed)</title>
+    <title>Advanced 3D Earth - Hand Controller</title>
     
-    <!-- Load Three.js -->
+    <!-- Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Load MediaPipe Hands v0.4 (Stable) -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
     <style>
-        body { margin: 0; background: #050505; color: white; font-family: sans-serif; overflow: hidden; }
-        #container { position: relative; width: 100vw; height: 100vh; }
+        body { margin: 0; background: #000; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
-        /* Video & Canvas Overlay */
-        #video-container {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            width: 240px;
-            height: 180px;
-            border: 2px solid #00d2ff;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 0 20px rgba(0,210,255,0.5);
-            z-index: 10;
-        }
-        #input_video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        #output_canvas {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            transform: scaleX(-1);
-            pointer-events: none;
-        }
-
-        #info {
+        /* UI Elements */
+        #gui {
             position: absolute;
             top: 20px; left: 20px;
-            background: rgba(0,0,0,0.7);
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #00d2ff;
-            z-index: 5;
-        }
-        .loading {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid #444;
+            backdrop-filter: blur(10px);
             z-index: 100;
         }
+
+        .stat-item { margin-bottom: 10px; font-size: 14px; }
+        .label { color: #888; margin-right: 10px; }
+        .value { color: #00d2ff; font-weight: bold; }
+
+        /* Video Feed */
+        #video-panel {
+            position: absolute;
+            bottom: 20px; right: 20px;
+            width: 280px; height: 210px;
+            border-radius: 12px;
+            border: 2px solid #00d2ff;
+            background: #111;
+            overflow: hidden;
+            transform: scaleX(-1);
+        }
+        #input_video { width: 100%; height: 100%; object-fit: cover; }
+        #output_canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+        /* Loading Screen */
+        #loading-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 1000;
+        }
+        .loader {
+            width: 60px; height: 60px;
+            border: 5px solid #111; border-top: 5px solid #00d2ff;
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <div id="loader" class="loading">
-        <p>กำลังโหลดระบบ AI ตรวจจับมือ... กรุณารอสักครู่</p>
+    <div id="loading-screen">
+        <div class="loader"></div>
+        <p style="margin-top: 20px;">กำลังดาวน์โหลดแผนที่โลกและเปิดระบบ AI...</p>
     </div>
 
-    <div id="info">
-        <h2 style="margin:0; color:#00d2ff;">3D Hand Control</h2>
-        <p id="status">สถานะ: กำลังเริ่มกล้อง...</p>
-        <small>วิธีใช้: ชูมือขึ้นมาให้นิ้วชี้ขยับเพื่อหมุนโลก</small>
+    <div id="gui">
+        <h2 style="margin:0 0 15px 0; color: #00d2ff;">Earth Controller 2.0</h2>
+        <div class="stat-item"><span class="label">สถานะมือ:</span> <span id="hand-status" class="value">ไม่พบมือ</span></div>
+        <div class="stat-item"><span class="label">การควบคุม:</span> <span id="gesture-action" class="value">Idle</span></div>
+        <div class="stat-item"><span class="label">ระดับการซูม:</span> <span id="zoom-level" class="value">1.0x</span></div>
+        <hr style="border: 0; border-top: 1px solid #333; margin: 15px 0;">
+        <div style="font-size: 12px; color: #aaa;">
+            • ขยับนิ้วชี้เพื่อหมุนโลก<br>
+            • จีบนิ้วโป้ง+ชี้ เพื่อซูมเข้า/ออก
+        </div>
     </div>
 
-    <div id="video-container">
-        <video id="input_video" playsinline></video>
+    <div id="video-panel">
+        <video id="input_video"></video>
         <canvas id="output_canvas"></canvas>
     </div>
-
-    <div id="container"></div>
 
     <script>
         const videoElement = document.getElementById('input_video');
         const canvasElement = document.getElementById('output_canvas');
         const canvasCtx = canvasElement.getContext('2d');
-        const statusText = document.getElementById('status');
-        const loader = document.getElementById('loader');
+        const loadingScreen = document.getElementById('loading-screen');
+        
+        // UI Refs
+        const handStatusUI = document.getElementById('hand-status');
+        const gestureUI = document.getElementById('gesture-action');
+        const zoomUI = document.getElementById('zoom-level');
 
-        // --- 1. Three.js Setup ---
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.getElementById('container').appendChild(renderer.domElement);
+        let scene, camera, renderer, earth, clouds;
+        let targetRotationX = 0, targetRotationY = 0;
+        let targetZoom = 15;
 
-        // สร้างลูกโลกแบบมีลวดลาย
-        const globeGeo = new THREE.SphereGeometry(5, 64, 64);
-        const globeMat = new THREE.MeshNormalMaterial({ wireframe: true });
-        const globe = new THREE.Mesh(globeGeo, globeMat);
-        scene.add(globe);
+        // --- 1. Three.js: Realistic Earth Setup ---
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
 
-        // แสงสว่าง
-        const light = new THREE.PointLight(0xffffff, 1, 100);
-        light.position.set(10, 10, 10);
-        scene.add(light);
-        camera.position.z = 15;
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+            const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            sunLight.position.set(5, 3, 5);
+            scene.add(sunLight);
+
+            // Texture Loader
+            const loader = new THREE.TextureLoader();
+            
+            // Earth
+            const earthGeo = new THREE.SphereGeometry(5, 64, 64);
+            const earthMat = new THREE.MeshPhongMaterial({
+                map: loader.load('https://unpkg.com/threejs-earth@1.0.1/src/img/earth_map.jpg'),
+                bumpMap: loader.load('https://unpkg.com/threejs-earth@1.0.1/src/img/earth_bump.jpg'),
+                bumpScale: 0.05,
+                specularMap: loader.load('https://unpkg.com/threejs-earth@1.0.1/src/img/earth_specular.jpg'),
+                specular: new THREE.Color('grey')
+            });
+            earth = new THREE.Mesh(earthGeo, earthMat);
+            scene.add(earth);
+
+            // Clouds
+            const cloudGeo = new THREE.SphereGeometry(5.1, 64, 64);
+            const cloudMat = new THREE.MeshPhongMaterial({
+                map: loader.load('https://unpkg.com/threejs-earth@1.0.1/src/img/earth_clouds.png'),
+                transparent: true,
+                opacity: 0.4
+            });
+            clouds = new THREE.Mesh(cloudGeo, cloudMat);
+            earth.add(clouds);
+
+            camera.position.z = 15;
+            animate();
+        }
 
         // --- 2. Hand Tracking Logic ---
         function onResults(results) {
-            // ซ่อนหน้าจอโหลดเมื่อเริ่มรับค่า
-            loader.style.display = 'none';
-
-            // วาดจุดบนมือในช่อง Preview
-            canvasCtx.save();
+            loadingScreen.style.display = 'none';
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                statusText.innerText = "สถานะ: ตรวจพบมือ";
-                statusText.style.color = "#00ff88";
+                handStatusUI.innerText = "กำลังควบคุม";
+                handStatusUI.style.color = "#00ff88";
+                
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Draw hand skeleton
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
 
-                for (const landmarks of results.multiHandLandmarks) {
-                    // วาดจุดเชื่อมต่อมือ (ช่วยให้เราเช็คได้ว่า AI เห็นอะไร)
-                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
-                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+                // Control Logic
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
 
-                    // ใช้ปลายนิ้วชี้ (Index Finger Tip - Index 8)
-                    const indexTip = landmarks[8];
-                    
-                    // คำนวณการหมุน (Smoothing)
-                    const targetX = (indexTip.y - 0.5) * Math.PI * 2;
-                    const targetY = (indexTip.x - 0.5) * Math.PI * 2;
+                // A. Rotation Logic (using index finger)
+                targetRotationY = (indexTip.x - 0.5) * Math.PI * 4;
+                targetRotationX = (indexTip.y - 0.5) * Math.PI * 2;
 
-                    globe.rotation.x += (targetX - globe.rotation.x) * 0.1;
-                    globe.rotation.y += (targetY - globe.rotation.y) * 0.1;
+                // B. Zoom Logic (Pinch Distance)
+                const dx = indexTip.x - thumbTip.x;
+                const dy = indexTip.y - thumbTip.y;
+                const distance = Math.sqrt(dx*dx + dy*dy);
+
+                if (distance < 0.05) { // จีบนิ้ว
+                    targetZoom -= 0.2;
+                    gestureUI.innerText = "ซูมเข้า (Pinch)";
+                } else if (distance > 0.15) { // กางมือ
+                    targetZoom += 0.2;
+                    gestureUI.innerText = "ซูมออก (Spread)";
+                } else {
+                    gestureUI.innerText = "หมุนลูกโลก";
                 }
+
+                // Clamp Zoom
+                targetZoom = Math.max(8, Math.min(25, targetZoom));
+                zoomUI.innerText = ((25 - targetZoom) / 10 + 1).toFixed(1) + "x";
+
             } else {
-                statusText.innerText = "สถานะ: ไม่พบมือในกล้อง";
-                statusText.style.color = "#ff4444";
-                // ให้หมุนเองช้าๆ
-                globe.rotation.y += 0.005;
+                handStatusUI.innerText = "ไม่พบมือ";
+                handStatusUI.style.color = "#ff4444";
+                gestureUI.innerText = "อัตโนมัติ";
+                earth.rotation.y += 0.002; // Auto spin
             }
-            canvasCtx.restore();
         }
 
-        // ตั้งค่า MediaPipe Hands
+        // --- 3. Finalize & Loops ---
         const hands = new Hands({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
@@ -148,38 +200,40 @@
         hands.setOptions({
             maxNumHands: 1,
             modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
         });
-
         hands.onResults(onResults);
 
-        // เชื่อมต่อกล้อง
-        const cameraCtrl = new Camera(videoElement, {
-            onFrame: async () => {
-                await hands.send({image: videoElement});
-            },
-            width: 640,
-            height: 480
+        const cameraPipe = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 640, height: 480
         });
+        cameraPipe.start();
 
-        cameraCtrl.start().catch(err => {
-            alert("ไม่สามารถเข้าถึงกล้องได้: " + err);
-            statusText.innerText = "สถานะ: กล้องขัดข้อง";
-        });
-
-        // --- 3. Rendering & Resize ---
         function animate() {
             requestAnimationFrame(animate);
+            
+            if (earth) {
+                // Smooth movement
+                earth.rotation.y += (targetRotationY - earth.rotation.y) * 0.05;
+                earth.rotation.x += (targetRotationX - earth.rotation.x) * 0.05;
+                camera.position.z += (targetZoom - camera.position.z) * 0.1;
+                
+                // Cloud rotation
+                if (clouds) clouds.rotation.y += 0.0005;
+            }
+            
             renderer.render(scene, camera);
         }
-        animate();
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
+
+        initThree();
     </script>
 </body>
 </html>
